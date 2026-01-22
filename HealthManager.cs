@@ -1,25 +1,40 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
+using System.Collections; // Potrzebne do Coroutine (odliczania czasu)
 
 public class HealthManager : MonoBehaviour
 {
-    public int health = 3;
-    public GameObject[] heartsUI; // Tablica obrazków serc w Canvasie (mo¿esz przypisaæ 3 obrazki)
+    [Header("Ustawienia")]
+    public int maxHealth = 3;
+    private int currentHealth;
 
-    // Referencje
-    private GameTimer gameTimer;
-    private PlayerController playerController;
+    // Czas ochronny po uderzeniu (zeby nie tracic 3 serc na raz)
+    public float immunityTime = 2.0f;
+    private bool isImmune = false; // Czy jestesmy niesmiertelni?
+
+    [Header("UI")]
+    public GameObject[] hearts; // Tu przeciagnij PELNE serca
+
+    [Header("Audio")]
+    public AudioClip hitSound;
+    private AudioSource audioSource;
 
     void Start()
     {
-        gameTimer = FindObjectOfType<GameTimer>();
-        playerController = GetComponent<PlayerController>();
+        currentHealth = maxHealth;
+        audioSource = GetComponent<AudioSource>();
+
+        // Reset serc na starcie
+        foreach (GameObject heart in hearts)
+        {
+            if (heart != null) heart.SetActive(true);
+        }
     }
 
-    private void OnCollisionEnter(Collision collision)
+    void OnCollisionEnter(Collision collision)
     {
-        // Pamiêtaj o dodaniu tagu "Wall" do œcian!
-        if (collision.gameObject.CompareTag("Wall"))
+        // 1. Sprawdzamy czy to sciana
+        // 2. Sprawdzamy czy NIE jestesmy niesmiertelni (isImmune == false)
+        if (collision.gameObject.CompareTag("Wall") && !isImmune)
         {
             TakeDamage();
         }
@@ -27,59 +42,74 @@ public class HealthManager : MonoBehaviour
 
     void TakeDamage()
     {
-        health--;
+        // Wlacz niesmiertelnosc
+        StartCoroutine(BecomeImmune());
 
-        // Wy³¹czamy serduszko w UI (np. ostatnie dostêpne)
-        if (health >= 0 && health < heartsUI.Length)
+        currentHealth--;
+        Debug.Log("A³a! Zosta³o ¿ycia: " + currentHealth);
+
+        // Dzwiek
+        if (audioSource != null && hitSound != null)
         {
-            heartsUI[health].SetActive(false);
+            audioSource.PlayOneShot(hitSound);
         }
 
-        Debug.Log("Ouch! ¯ycia: " + health);
+        // Aktualizacja UI (Wylaczamy odpowiednie serce)
+        if (currentHealth >= 0 && currentHealth < hearts.Length)
+        {
+            if (hearts[currentHealth] != null)
+            {
+                hearts[currentHealth].SetActive(false);
+            }
+        }
 
-        if (health <= 0)
+        if (currentHealth <= 0)
         {
             GameOver();
         }
     }
 
-    void GameOver()
+    // To jest licznik czasu niesmiertelnosci
+    IEnumerator BecomeImmune()
     {
-        Debug.Log("GAME OVER");
+        isImmune = true;
 
-        // 1. Zatrzymaj czas
-        if (gameTimer != null) gameTimer.StopTimer();
+        // Opcjonalnie: Tutaj mozna dodac miganie gracza (zmienianie koloru)
+        GetComponent<MeshRenderer>().material.color = Color.red; // Robi sie czerwony
 
-        // 2. Zatrzymaj gracza
-        if (playerController != null) playerController.enabled = false;
-        GetComponent<Rigidbody>().isKinematic = true; // Ca³kowite zamro¿enie fizyki
+        yield return new WaitForSeconds(immunityTime); // Czekaj 2 sekundy
 
-        // 3. Zapisz wynik do Firebase
-        SaveScoreToDatabase();
-
-        // 4. Tutaj mo¿esz pokazaæ Panel Game Over (z przyciskiem Restart/Menu)
-        // np. gameOverPanel.SetActive(true);
+        GetComponent<MeshRenderer>().material.color = Color.white; // Wraca do normy
+        isImmune = false;
     }
 
-    void SaveScoreToDatabase()
+    void GameOver()
     {
-        // Pobieramy nick, który wpisaliœmy w Menu
+        Debug.Log("GAME OVER - Zapisywanie wyniku...");
+
         string nick = PlayerPrefs.GetString("PlayerNick", "Anonim");
 
-        // Pobieramy czas
-        float finalTime = gameTimer != null ? gameTimer.GetFinalTime() : 0f;
-        string formattedTime = gameTimer != null ? gameTimer.GetFormattedTime() : "00:00";
+        GameTimer timerScript = FindObjectOfType<GameTimer>();
+        float wynikCzasowy = 0f;
+        string ladnyCzas = "00:00:00";
 
-        // Wywo³ujemy Twój skrypt Firebase (musimy tam dodaæ tê metodê!)
-        // Zak³adam, ¿e masz FirebaseManager na scenie
-        FirebaseManager fb = FindObjectOfType<FirebaseManager>();
-        if (fb != null)
+        if (timerScript != null)
         {
-            fb.SaveScore(nick, finalTime, formattedTime);
+            timerScript.StopTimer();
+            wynikCzasowy = timerScript.GetFinalTime();
+            ladnyCzas = timerScript.GetFormattedTime();
         }
-        else
+
+        FirebaseManager firebase = FindObjectOfType<FirebaseManager>();
+
+        // Zabezpieczenie przed szybka smiercia zanim Firebase wstanie
+        if (firebase != null)
         {
-            Debug.LogError("Brak FirebaseManager na scenie!");
+            // Próbujemy wys³aæ - skrypt Firebase sam sprawdzi czy jest gotowy
+            firebase.SaveScore(nick, wynikCzasowy, ladnyCzas);
         }
+
+        // Zniszcz gracza
+        Destroy(gameObject);
     }
 }
