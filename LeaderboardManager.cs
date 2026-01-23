@@ -2,6 +2,7 @@ using UnityEngine;
 using Firebase.Database;
 using Firebase.Extensions;
 using System.Collections.Generic;
+using System.Linq; // Odwracanie listy!
 
 public class LeaderboardManager : MonoBehaviour
 {
@@ -9,59 +10,53 @@ public class LeaderboardManager : MonoBehaviour
     public Transform contentArea;
     public GameObject loadingIndicator;
 
-    // URL Datebase
     private const string DATABASE_URL = "https://voxellabyrinth-default-rtdb.europe-west1.firebasedatabase.app/";
     private DatabaseReference reference;
 
     void Start()
     {
         reference = FirebaseDatabase.GetInstance(DATABASE_URL).RootReference;
-        // Nie wywolujemy LoadLeaderboard w Start, bo robimy to przyciskiem w Menu
-        // Ale jesli chcesz testowac bez klikania, mozesz odkomentowac:
-        // LoadLeaderboard();
     }
 
     public void LoadLeaderboard()
     {
         if (loadingIndicator != null) loadingIndicator.SetActive(true);
 
-        // 1. Czyszczenie listy
         foreach (Transform child in contentArea)
         {
             Destroy(child.gameObject);
         }
 
-        // 2. Pobieranie danych
-        reference.Child("wyniki").OrderByChild("timeRaw").LimitToFirst(10).GetValueAsync().ContinueWithOnMainThread(task =>
+        // ZMIANA 1: LimitToLast(10), ¿eby wzi¹æ NAJWIÊKSZE czasy
+        // Jeœli  najszybsze (ma³e) czasy, czyli odwrotnie, to trzeba zostawiæ LimitToFirst.
+
+        reference.Child("wyniki").OrderByChild("timeRaw").LimitToLast(10).GetValueAsync().ContinueWithOnMainThread(task =>
         {
-            if (task.IsFaulted)
-            {
-                Debug.LogError("B³¹d Firebase: " + task.Exception);
-            }
-            else if (task.IsCompleted)
+            if (task.IsCompleted)
             {
                 DataSnapshot snapshot = task.Result;
 
-                if (!snapshot.HasChildren)
+                // ZMIANA 2: Wrzucamy wyniki do listy i odwracamy kolejnoœæ
+                List<DataSnapshot> allScores = new List<DataSnapshot>();
+                foreach (DataSnapshot child in snapshot.Children)
                 {
-                    Debug.Log("Brak wyników w bazie!");
+                    allScores.Add(child);
                 }
 
-                int rank = 1;
-                foreach (DataSnapshot score in snapshot.Children)
-                {
+                // Odwracamy listê (Najwiêkszy czas bêdzie pierwszy)
+                allScores.Reverse();
 
-                    // 1. Pobiera Nick
+                int rank = 1;
+                foreach (DataSnapshot score in allScores)
+                {
                     string nick = "Nieznany";
                     if (score.Child("username").Exists)
                         nick = score.Child("username").Value.ToString();
 
-                    // 2. Pobiera Czas
                     string time = "--:--";
                     if (score.Child("timeString").Exists)
                         time = score.Child("timeString").Value.ToString();
 
-                    // Tworzt wiersz
                     CreateRow(rank, nick, time);
                     rank++;
                 }
