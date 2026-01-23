@@ -1,21 +1,24 @@
 using UnityEngine;
 using Firebase;
 using Firebase.Database;
-using Firebase.Extensions; // Wa¿ne do obs³ugi w¹tków
+using Firebase.Extensions;
+using System.Collections; 
 
 public class FirebaseManager : MonoBehaviour
 {
     private DatabaseReference reference;
     private bool isFirebaseReady = false;
 
+    // WA¯NE: Adres Twojej bazy w Europie
+    private const string DATABASE_URL = "https://voxellabyrinth-default-rtdb.europe-west1.firebasedatabase.app/";
+
     void Start()
     {
-        // Sprawdzamy zale¿noœci Firebase (standardowa procedura)
-        FirebaseApp.CheckAndFixDependenciesAsync().ContinueWithOnMainThread(task => {
+        FirebaseApp.CheckAndFixDependenciesAsync().ContinueWithOnMainThread(task =>
+        {
             var dependencyStatus = task.Result;
             if (dependencyStatus == DependencyStatus.Available)
             {
-                // Firebase dzia³a! Inicjalizujemy bazê
                 InitializeFirebase();
             }
             else
@@ -27,52 +30,78 @@ public class FirebaseManager : MonoBehaviour
 
     void InitializeFirebase()
     {
-        // Pobieramy g³ówny punkt dostêpu do bazy danych
-        reference = FirebaseDatabase.DefaultInstance.RootReference;
-        isFirebaseReady = true;
-        Debug.Log("Firebase po³¹czony i gotowy!");
+        try
+        {
+            // Tutaj u¿ywamy konkretnego URL zamiast DefaultInstance
+            reference = FirebaseDatabase.GetInstance(DATABASE_URL).RootReference;
+            isFirebaseReady = true;
+            Debug.Log("Firebase po³¹czony i gotowy (Europa)!");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("B³¹d inicjalizacji bazy: " + e.Message);
+        }
     }
 
-    // Tê funkcjê wywo³uje Twój HealthManager!
     public void SaveScore(string nick, float rawTime, string displayTime)
     {
         if (!isFirebaseReady || reference == null)
         {
-            Debug.LogError("Firebase nie jest jeszcze gotowy!");
+            Debug.LogWarning("Firebase nie gotowy, próbuje wys³aæ za chwilê...");
+            StartCoroutine(WaitForFirebaseAndSend(nick, rawTime, displayTime));
             return;
         }
 
-        // Tworzymy obiekt z danymi do wys³ania
+        SendToDatabase(nick, rawTime, displayTime);
+    }
+
+    System.Collections.IEnumerator WaitForFirebaseAndSend(string n, float r, string d)
+    {
+        float timer = 0;
+        // Czekaj max 5 sekund
+        while (!isFirebaseReady && timer < 5.0f)
+        {
+            timer += Time.deltaTime;
+            yield return null;
+        }
+
+        if (isFirebaseReady)
+        {
+            SendToDatabase(n, r, d);
+        }
+        else
+        {
+            Debug.LogError("Timeout! Firebase nie po³¹czy³ siê w 5 sekund.");
+        }
+    }
+
+    void SendToDatabase(string nick, float rawTime, string displayTime)
+    {
         UserScore scoreData = new UserScore(nick, rawTime, displayTime);
-
-        // Zamieniamy obiekt na format JSON (tekstowy)
         string json = JsonUtility.ToJson(scoreData);
-
-        // Generujemy unikalny klucz dla wpisu (¿eby wyniki siê nie nadpisywa³y)
         string key = reference.Child("wyniki").Push().Key;
 
-        // Wysy³amy do bazy
         reference.Child("wyniki").Child(key).SetRawJsonValueAsync(json)
-            .ContinueWithOnMainThread(task => {
+            .ContinueWithOnMainThread(task =>
+            {
                 if (task.IsCompleted)
                 {
-                    Debug.Log("Wynik zapisany w chmurze pomyœlnie!");
+                    Debug.Log($"SUKCES! Wys³ano do bazy: {nick} - {displayTime}");
                 }
                 else
                 {
-                    Debug.LogError("Nie uda³o siê zapisaæ wyniku: " + task.Exception);
+                    Debug.LogError("B³¹d wysy³ania: " + task.Exception);
                 }
             });
     }
 }
 
-// Klasa pomocnicza - struktura danych, któr¹ wysy³amy
 [System.Serializable]
 public class UserScore
 {
     public string username;
-    public float timeRaw;     // Czas w sekundach (do sortowania)
-    public string timeString; // Czas ³adny (01:23:45) do wyœwietlania
+    public float timeRaw;
+    public string timeString;
 
     public UserScore(string name, float t, string ts)
     {
