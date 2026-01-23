@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "678723528423",
+    "project_id": "voxellabyrinth",
+    "storage_bucket": "voxellabyrinth.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:678723528423:android:4e9a8810ba061a220d2442",
+        "android_client_info": {
+          "package_name": "com.DevKxm.VoxelLabyrinth"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCfQuRqdUXcaSP7gyaUiATxV2mLd_RlkJI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
