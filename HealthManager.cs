@@ -1,40 +1,37 @@
 using UnityEngine;
-using System.Collections; // Potrzebne do Coroutine (odliczania czasu)
+using UnityEngine.UI;
+using UnityEngine.SceneManagement; // Do ³adowania scen
+using TMPro; // Jeœli u¿ywa siê TMP do wyœwietlania wyniku
 
 public class HealthManager : MonoBehaviour
 {
-    [Header("Ustawienia")]
     public int maxHealth = 3;
-    private int currentHealth;
+    public int currentHealth;
 
-    // Czas ochronny po uderzeniu (zeby nie tracic 3 serc na raz)
-    public float immunityTime = 2.0f;
-    private bool isImmune = false; // Czy jestesmy niesmiertelni?
+    [Header("UI Reference")]
+    public Image[] hearts;
+    public Sprite fullHeart;
+    public Sprite emptyHeart;
 
-    [Header("UI")]
-    public GameObject[] hearts; // Tu przeciagnij PELNE serca
+    [Header("Game Over UI")]
+    public GameObject gameOverPanel; // Tutaj swój GameOverPanel z Canvasa
+    public LeaderboardManager leaderboardManager; // Tutaj obiekt Managers ze sceny
 
-    [Header("Audio")]
-    public AudioClip hitSound;
-    private AudioSource audioSource;
+    private bool isImmune = false;
+    private bool isDead = false;
 
     void Start()
     {
         currentHealth = maxHealth;
-        audioSource = GetComponent<AudioSource>();
+        UpdateHearts();
 
-        // Reset serc na starcie
-        foreach (GameObject heart in hearts)
-        {
-            if (heart != null) heart.SetActive(true);
-        }
+        // Na starcie ekran koñcowy MUSI byæ ukryty
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
     }
 
     void OnCollisionEnter(Collision collision)
     {
-        // 1. Sprawdzamy czy to sciana
-        // 2. Sprawdzamy czy NIE jestesmy niesmiertelni (isImmune == false)
-        if (collision.gameObject.CompareTag("Wall") && !isImmune)
+        if (collision.gameObject.CompareTag("Wall") && !isImmune && !isDead)
         {
             TakeDamage();
         }
@@ -42,74 +39,113 @@ public class HealthManager : MonoBehaviour
 
     void TakeDamage()
     {
-        // Wlacz niesmiertelnosc
-        StartCoroutine(BecomeImmune());
+        if (isDead) return;
 
         currentHealth--;
-        Debug.Log("A³a! Zosta³o ¿ycia: " + currentHealth);
-
-        // Dzwiek
-        if (audioSource != null && hitSound != null)
-        {
-            audioSource.PlayOneShot(hitSound);
-        }
-
-        // Aktualizacja UI (Wylaczamy odpowiednie serce)
-        if (currentHealth >= 0 && currentHealth < hearts.Length)
-        {
-            if (hearts[currentHealth] != null)
-            {
-                hearts[currentHealth].SetActive(false);
-            }
-        }
+        UpdateHearts();
 
         if (currentHealth <= 0)
         {
             GameOver();
         }
+        else
+        {
+            StartCoroutine(BecomeImmune());
+        }
     }
 
-    // To jest licznik czasu niesmiertelnosci
-    IEnumerator BecomeImmune()
+    void UpdateHearts()
+    {
+        for (int i = 0; i < hearts.Length; i++)
+        {
+            if (i < currentHealth) hearts[i].sprite = fullHeart;
+            else hearts[i].sprite = emptyHeart;
+        }
+    }
+
+    System.Collections.IEnumerator BecomeImmune()
     {
         isImmune = true;
+        // Opcjonalnie: Migalnie lub zmiana koloru gracza, tutaj czerwony
+        if (GetComponent<MeshRenderer>() != null)
+            GetComponent<MeshRenderer>().material.color = Color.red;
 
-        // Opcjonalnie: Tutaj mozna dodac miganie gracza (zmienianie koloru)
-        GetComponent<MeshRenderer>().material.color = Color.red; // Robi sie czerwony
+        yield return new WaitForSeconds(2.0f);
 
-        yield return new WaitForSeconds(immunityTime); // Czekaj 2 sekundy
-
-        GetComponent<MeshRenderer>().material.color = Color.white; // Wraca do normy
+        if (GetComponent<MeshRenderer>() != null)
+            GetComponent<MeshRenderer>().material.color = Color.white;
         isImmune = false;
     }
 
     void GameOver()
     {
-        Debug.Log("GAME OVER - Zapisywanie wyniku...");
+        isDead = true;
+        Debug.Log("GAME OVER!");
 
-        string nick = PlayerPrefs.GetString("PlayerNick", "Anonim");
-
-        GameTimer timerScript = FindObjectOfType<GameTimer>();
-        float wynikCzasowy = 0f;
-        string ladnyCzas = "00:00:00";
-
-        if (timerScript != null)
+        // 1. ZATRZYMAJ GRACZA
+        Rigidbody rb = GetComponent<Rigidbody>();
+        if (rb != null)
         {
-            timerScript.StopTimer();
-            wynikCzasowy = timerScript.GetFinalTime();
-            ladnyCzas = timerScript.GetFormattedTime();
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.isKinematic = true;
         }
 
+        PlayerController pc = GetComponent<PlayerController>();
+        if (pc != null) pc.enabled = false;
+
+        // 2. ZATRZYMAJ CZAS I POBIERZ WYNIK
+        GameTimer timer = FindObjectOfType<GameTimer>();
+        float finalTime = 0f;
+        string displayTime = "00:00:00";
+
+        if (timer != null)
+        {
+            timer.StopTimer();
+            finalTime = timer.GetFinalTime();
+            displayTime = timer.GetFormattedTime();
+        }
+
+        // 3. ZAPISZ WYNIK W FIREBASE
+        string nick = PlayerPrefs.GetString("PlayerNick", "Anonim");
         FirebaseManager firebase = FindObjectOfType<FirebaseManager>();
 
-        // Zabezpieczenie przed szybka smiercia zanim Firebase wstanie
         if (firebase != null)
         {
-            // Próbujemy wys³aæ - skrypt Firebase sam sprawdzi czy jest gotowy
-            firebase.SaveScore(nick, wynikCzasowy, ladnyCzas);
+            firebase.SaveScore(nick, finalTime, displayTime);
         }
 
-        // Zniszcz gracza
-        Destroy(gameObject);
+        // 4. POKA¯ EKRAN KOÑCOWY
+        if (gameOverPanel != null)
+        {
+            gameOverPanel.SetActive(true);
+
+            // Opcjonalnie: Od razu za³aduj tabelê wyników (jeœli jest widoczna na ekranie)
+            if (leaderboardManager != null)
+            {
+                // Czekamy chwilkê (np. 1s) ¿eby Firebase zd¹¿y³ zapisaæ nasz nowy wynik zanim go pobierzemy
+                Invoke("RefreshLeaderboard", 1.0f);
+            }
+        }
+    }
+
+    // Metoda pomocnicza do odœwie¿enia tabeli z opóŸnieniem
+    void RefreshLeaderboard()
+    {
+        if (leaderboardManager != null) leaderboardManager.LoadLeaderboard();
+    }
+
+    // --- FUNKCJE DLA PRZYCISKÓW ---
+
+    public void RestartGame()
+    {
+        // £aduje ponownie aktualn¹ scenê
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    public void GoToMainMenu()
+    {
+        // Nazwa sceny w Build Settings musi byæ dok³adnie "MainMenu"
+        SceneManager.LoadScene("MainMenu");
     }
 }
