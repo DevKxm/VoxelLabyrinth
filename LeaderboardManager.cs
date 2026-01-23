@@ -5,35 +5,34 @@ using System.Collections.Generic;
 
 public class LeaderboardManager : MonoBehaviour
 {
-    public GameObject rowPrefab;  
-    public Transform contentArea; 
-    public GameObject loadingIndicator; // Opcjonalnie napis "£adowanie..."
+    public GameObject rowPrefab;
+    public Transform contentArea;
+    public GameObject loadingIndicator;
 
-    // URL (musi byæ ten sam co w FirebaseManager!)
+    // URL Datebase
     private const string DATABASE_URL = "https://voxellabyrinth-default-rtdb.europe-west1.firebasedatabase.app/";
     private DatabaseReference reference;
 
     void Start()
     {
         reference = FirebaseDatabase.GetInstance(DATABASE_URL).RootReference;
-
-        LoadLeaderboard();
+        // Nie wywolujemy LoadLeaderboard w Start, bo robimy to przyciskiem w Menu
+        // Ale jesli chcesz testowac bez klikania, mozesz odkomentowac:
+        // LoadLeaderboard();
     }
 
     public void LoadLeaderboard()
     {
         if (loadingIndicator != null) loadingIndicator.SetActive(true);
 
-        // 1. Wyczyœci star¹ listê (¿eby nie dublowaæ wyników)
+        // 1. Czyszczenie listy
         foreach (Transform child in contentArea)
         {
             Destroy(child.gameObject);
         }
 
-        // 2. Pobierze dane z Firebase
-        // OrderByChild("rawTime") - sortuje od najmniejszego czasu (najszybszy wygrywa)
-        // LimitToFirst(10) - bierze tylko TOP 10
-        reference.Child("wyniki").OrderByChild("rawTime").LimitToFirst(10).GetValueAsync().ContinueWithOnMainThread(task =>
+        // 2. Pobieranie danych
+        reference.Child("wyniki").OrderByChild("timeRaw").LimitToFirst(10).GetValueAsync().ContinueWithOnMainThread(task =>
         {
             if (task.IsFaulted)
             {
@@ -43,18 +42,26 @@ public class LeaderboardManager : MonoBehaviour
             {
                 DataSnapshot snapshot = task.Result;
 
-                // 3. Iteruje po wynikach
-                int rank = 1;
+                if (!snapshot.HasChildren)
+                {
+                    Debug.Log("Brak wyników w bazie!");
+                }
 
-                // Firebase mo¿e zwróciæ wyniki w odwrotnej kolejnoœci przy sortowaniu,
-                // ale przy OrderByChild zazwyczaj jest rosn¹co (co nam pasuje dla czasu).
+                int rank = 1;
                 foreach (DataSnapshot score in snapshot.Children)
                 {
-                    // Wyci¹gamy dane z JSONa
-                    string nick = score.Child("nick").Value.ToString();
-                    string time = score.Child("displayTime").Value.ToString();
 
-                    // Tworzymy wiersz w tabeli
+                    // 1. Pobiera Nick
+                    string nick = "Nieznany";
+                    if (score.Child("username").Exists)
+                        nick = score.Child("username").Value.ToString();
+
+                    // 2. Pobiera Czas
+                    string time = "--:--";
+                    if (score.Child("timeString").Exists)
+                        time = score.Child("timeString").Value.ToString();
+
+                    // Tworzt wiersz
                     CreateRow(rank, nick, time);
                     rank++;
                 }
@@ -66,10 +73,7 @@ public class LeaderboardManager : MonoBehaviour
 
     void CreateRow(int rank, string nick, string time)
     {
-        // Tworzymy obiekt z prefabrykatu wewn¹trz Content
         GameObject newRow = Instantiate(rowPrefab, contentArea);
-
-        // Ustawiamy dane w skrypcie ScoreRow
         ScoreRow rowScript = newRow.GetComponent<ScoreRow>();
         if (rowScript != null)
         {
